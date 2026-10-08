@@ -11,18 +11,18 @@ const colyseus = require('colyseus')
  * pool underneath, and its ping/pong keeps dead connections reaped for us.
  *
  * Protocol: unchanged from the plain-WebSocket version, except 'hello' is gone -
- * joining a room already carries what it used to (name/avatar/sword/pet/trainer),
+ * joining a room already carries what it used to (name/avatar/gun/pet/trainer),
  * as the join options. Everything else is still a typed message:
  *
  *   client -> server
- *     'profile' { name, avatar, sword, pet, trainer }  any of these changed
- *     'state'   { p: [x, y, z], sw, ts }  own position; sw counts sword swings,
+ *     'profile' { name, avatar, gun, pet, trainer }  any of these changed
+ *     'state'   { p: [x, y, z], sw, ts }  own position; sw counts shots fired,
  *                                         ts is the sender's clock in ms
  *
  *   server -> client
  *     'welcome' { id, lobby: { id, name, max }, players: [player...] }
  *     'join' { player }   'leave' { id }
- *     'profile' { id, name, avatar, sword, pet, trainer }
+ *     'profile' { id, name, avatar, gun, pet, trainer }
  *     'states' { s: [[id, x, y, z, sw, ts], ...] }   everyone who moved, 20/s
  */
 
@@ -30,17 +30,23 @@ const TICK_MS = 1000 / 20
 const MAX_AVATAR_BYTES = 4 * 1024
 const MAX_MESSAGES_PER_SECOND = 40
 const NAME_MAX = 24
-const SWORD_MAX = 32
+const GUN_MAX = 32
 const PET_MAX = 32
 const TRAINER_MAX = 32
 /** Positions outside this box are rejected as garbage. */
 const WORLD_LIMIT = 10000
+/**
+ * Players one pod holds. The deploy tells Legion's matchmaker the same number as
+ * `seatCap` (see .github/workflows/deploy.yml): when a pod is this full, the
+ * matchmaker starts another rather than squeezing one more in. Keep the two equal.
+ */
+const SEAT_CAP = Number(process.env.SEAT_CAP) || 50
 
-/** Name, avatar, sword, equipped pet and active trainer pad from a join/profile
+/** Name, avatar, gun, equipped pet and active target pad from a join/profile
  *  message, cleaned up. */
 function readProfile(message) {
   const name = typeof message?.name === 'string' ? message.name.trim().slice(0, NAME_MAX) : ''
-  const sword = typeof message?.sword === 'string' ? message.sword.slice(0, SWORD_MAX) : null
+  const gun = typeof message?.gun === 'string' ? message.gun.slice(0, GUN_MAX) : null
   const pet = typeof message?.pet === 'string' ? message.pet.slice(0, PET_MAX) : null
   const trainer = typeof message?.trainer === 'string' ? message.trainer.slice(0, TRAINER_MAX) : null
   let avatar = null
@@ -48,7 +54,7 @@ function readProfile(message) {
     const size = JSON.stringify(message.avatar).length
     if (size <= MAX_AVATAR_BYTES) avatar = message.avatar
   }
-  return { name: name || 'Player', avatar, sword, pet, trainer }
+  return { name: name || 'Player', avatar, gun, pet, trainer }
 }
 
 /** `[x, y, z]` rounded to centimetres, or null if it isn't a sane position. */
@@ -68,7 +74,7 @@ function publicPlayer(player) {
     id: player.id,
     name: player.name,
     avatar: player.avatar,
-    sword: player.sword,
+    gun: player.gun,
     pet: player.pet,
     trainer: player.trainer,
     p: player.p,
@@ -94,6 +100,7 @@ class LobbyRoom extends colyseus.Room {
   /** `lobbies`: the shared LobbyManager, passed in via gameServer.define(...). */
   onCreate({ lobbies }) {
     this.lobbies = lobbies
+    this.maxClients = SEAT_CAP
     this.tick = setInterval(() => this.broadcastMoved(), TICK_MS)
 
     this.onMessage('state', (client, message) => {
@@ -122,7 +129,7 @@ class LobbyRoom extends colyseus.Room {
             id: player.id,
             name: player.name,
             avatar: player.avatar,
-            sword: player.sword,
+            gun: player.gun,
             pet: player.pet,
             trainer: player.trainer,
           },
@@ -132,7 +139,7 @@ class LobbyRoom extends colyseus.Room {
     })
   }
 
-  /** Joining the room already carries what 'hello' used to (name/avatar/sword). */
+  /** Joining the room already carries what 'hello' used to (name/avatar/gun). */
   onJoin(client, options) {
     const player = {
       id: client.sessionId,

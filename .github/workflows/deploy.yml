@@ -9,6 +9,10 @@
 #
 # `main` pushes go to the prod channel, `dev` pushes go to the dev (playtest)
 # channel; nothing else triggers a deploy.
+#
+# seatCap is how many players one pod holds before the matchmaker starts another. It
+# must equal the lobby room's cap (SEAT_CAP in src/lobbyRoom.js, 50 by default). No
+# maxReplicas: Boxity starts as many pods as the players need on its own.
 name: Deploy server to Bloxity Legion
 
 on:
@@ -47,7 +51,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ steps.plan.outputs.owner }}/power-per-click-server:${{ steps.plan.outputs.channel }}-${{ github.sha }}
+          tags: ghcr.io/${{ steps.plan.outputs.owner }}/ammo-per-click-server:${{ steps.plan.outputs.channel }}-${{ github.sha }}
 
       - name: Tell Legion to roll it out
         run: |
@@ -57,8 +61,7 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{
               "channel": "${{ steps.plan.outputs.channel }}",
-              "image": "ghcr.io/${{ steps.plan.outputs.owner }}/power-per-click-server:${{ steps.plan.outputs.channel }}-${{ github.sha }}",
+              "image": "ghcr.io/${{ steps.plan.outputs.owner }}/ammo-per-click-server:${{ steps.plan.outputs.channel }}-${{ github.sha }}",
               "version": "${{ github.sha }}",
-              "seatCap": 50,
-              "maxReplicas": 5
+              "seatCap": 50
             }'

@@ -1,5 +1,5 @@
 {
-  "name": "server",
+  "name": "ammo-per-click-server",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -19,7 +19,8 @@
     "@colyseus/ws-transport": "^0.18.2",
     "colyseus": "^0.18.5",
     "cors": "^2.8.6",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mongodb": "^6.21.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
