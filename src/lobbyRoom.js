@@ -11,18 +11,18 @@ const colyseus = require('colyseus')
  * pool underneath, and its ping/pong keeps dead connections reaped for us.
  *
  * Protocol: unchanged from the plain-WebSocket version, except 'hello' is gone -
- * joining a room already carries what it used to (name/avatar/gun/pet/trainer),
+ * joining a room already carries what it used to (name/avatar/gun/pet/trainer/footprints),
  * as the join options. Everything else is still a typed message:
  *
  *   client -> server
- *     'profile' { name, avatar, gun, pet, trainer }  any of these changed
+ *     'profile' { name, avatar, gun, pet, trainer, footprints }  any of these changed
  *     'state'   { p: [x, y, z], sw, ts }  own position; sw counts shots fired,
  *                                         ts is the sender's clock in ms
  *
  *   server -> client
  *     'welcome' { id, lobby: { id, name, max }, players: [player...] }
  *     'join' { player }   'leave' { id }
- *     'profile' { id, name, avatar, gun, pet, trainer }
+ *     'profile' { id, name, avatar, gun, pet, trainer, footprints }
  *     'states' { s: [[id, x, y, z, sw, ts], ...] }   everyone who moved, 20/s
  */
 
@@ -33,6 +33,7 @@ const NAME_MAX = 24
 const GUN_MAX = 32
 const PET_MAX = 32
 const TRAINER_MAX = 32
+const FOOTPRINTS_MAX = 32
 /** Positions outside this box are rejected as garbage. */
 const WORLD_LIMIT = 10000
 /**
@@ -42,19 +43,20 @@ const WORLD_LIMIT = 10000
  */
 const SEAT_CAP = Number(process.env.SEAT_CAP) || 50
 
-/** Name, avatar, gun, equipped pet and active target pad from a join/profile
- *  message, cleaned up. */
+/** Name, avatar, gun, equipped pet, footprints and active target pad from a
+ *  join/profile message, cleaned up. */
 function readProfile(message) {
   const name = typeof message?.name === 'string' ? message.name.trim().slice(0, NAME_MAX) : ''
   const gun = typeof message?.gun === 'string' ? message.gun.slice(0, GUN_MAX) : null
   const pet = typeof message?.pet === 'string' ? message.pet.slice(0, PET_MAX) : null
   const trainer = typeof message?.trainer === 'string' ? message.trainer.slice(0, TRAINER_MAX) : null
+  const footprints = typeof message?.footprints === 'string' ? message.footprints.slice(0, FOOTPRINTS_MAX) : null
   let avatar = null
   if (message?.avatar && typeof message.avatar === 'object') {
     const size = JSON.stringify(message.avatar).length
     if (size <= MAX_AVATAR_BYTES) avatar = message.avatar
   }
-  return { name: name || 'Player', avatar, gun, pet, trainer }
+  return { name: name || 'Player', avatar, gun, pet, trainer, footprints }
 }
 
 /** `[x, y, z]` rounded to centimetres, or null if it isn't a sane position. */
@@ -77,6 +79,7 @@ function publicPlayer(player) {
     gun: player.gun,
     pet: player.pet,
     trainer: player.trainer,
+    footprints: player.footprints,
     p: player.p,
     sw: player.sw,
   }
@@ -132,6 +135,7 @@ class LobbyRoom extends colyseus.Room {
             gun: player.gun,
             pet: player.pet,
             trainer: player.trainer,
+            footprints: player.footprints,
           },
           player,
         )

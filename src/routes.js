@@ -7,6 +7,9 @@ const { sanitizeProgress, withEntitlements } = require('./progress')
 
 /** Least time between two saves from one account; anything faster is turned away. */
 const MIN_SAVE_GAP_MS = 1000
+/** Rows on each leaderboard, and how long one answer is reused. */
+const LEADERBOARD_SIZE = 10
+const LEADERBOARD_TTL_MS = 30 * 1000
 /** A save is a few kilobytes; anything near this is not one. */
 const MAX_BODY = '64kb'
 
@@ -53,6 +56,7 @@ function granted(entitlements) {
  *   PUT  /api/progress         store it
  *   POST /api/progress/beacon  store it, from a page that is closing (see below)
  *   POST /api/legion-webhook   Bloxity telling us a purchase went through
+ *   GET  /api/leaderboard      the top players, for the boards in the lobby
  *
  * The first two are the player's own browser, carrying their Bloxity token (see
  * auth.js). The webhook is Bloxity's server talking to ours, and can arrive at any
@@ -78,6 +82,38 @@ function mountRoutes(app, store) {
     } catch (error) {
       console.error('[progress] load failed:', error)
       res.status(500).json({ error: 'could not load your progress' })
+    }
+  })
+
+  /**
+   * The lobby's leaderboards: the top LEADERBOARD_SIZE signed-in players by Wins, by
+   * Rebirths, and by bosses beaten. Public - names and scores only - and cached per
+   * pod for LEADERBOARD_TTL_MS, so a full lobby asking at once is one set of queries.
+   */
+  let board = null
+  app.get('/api/leaderboard', async (_req, res) => {
+    try {
+      if (!board || Date.now() - board.at > LEADERBOARD_TTL_MS) {
+        const [wins, rebirths, bosses] = await Promise.all(
+          ['wins', 'rebirths', 'bossLevel'].map((field) => store.topSaves(field, LEADERBOARD_SIZE + 1)),
+        )
+        board = {
+          at: Date.now(),
+          body: {
+            wins: wins.slice(0, LEADERBOARD_SIZE),
+            rebirths: rebirths.slice(0, LEADERBOARD_SIZE),
+            // The save holds the next boss to fight; the board counts the ones beaten.
+            bosses: bosses
+              .map(({ username, value }) => ({ username, value: value - 1 }))
+              .filter((row) => row.value > 0)
+              .slice(0, LEADERBOARD_SIZE),
+          },
+        }
+      }
+      res.set('Cache-Control', 'public, max-age=30').json(board.body)
+    } catch (error) {
+      console.error('[leaderboard] failed:', error)
+      res.status(500).json({ error: 'could not load the leaderboard' })
     }
   })
 

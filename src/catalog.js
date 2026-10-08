@@ -6,11 +6,8 @@
  * This copy is the one that counts: it is how the purchase webhook knows what a SKU
  * grants, and how a save is checked for Bux items nobody paid for.
  *
- * kind:
- *   gun / trainer / pet / pass  kept for good. Recorded against the account when the
- *                               webhook arrives, and handed back with every load.
- *   ammo                        spent on arrival. Recorded for the books only; the
- *                               Ammo itself travels with the rest of the save.
+ * kind: gun / trainer / pet / pass - all kept for good. Recorded against the account
+ * when the webhook arrives, and handed back with every load.
  */
 const BUX_ITEMS = [
   { sku: 'gun_phantom_blaster', kind: 'gun', id: 'phantom' },
@@ -22,9 +19,6 @@ const BUX_ITEMS = [
   { sku: 'pass_2x_power', kind: 'pass', id: 'power2x' },
   { sku: 'pass_2x_wins', kind: 'pass', id: 'wins2x' },
   { sku: 'pass_auto_wins', kind: 'pass', id: 'autoWins' },
-  { sku: 'ammo_pack_100k', kind: 'ammo', id: 'ammo100k' },
-  { sku: 'ammo_pack_1m', kind: 'ammo', id: 'ammo1m' },
-  { sku: 'ammo_pack_10m', kind: 'ammo', id: 'ammo10m' },
 ]
 
 const BY_SKU = new Map(BUX_ITEMS.map((item) => [item.sku, item]))

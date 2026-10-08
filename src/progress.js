@@ -17,8 +17,8 @@ const MAX_LIST = 200
 const MAX_ID = 40
 
 const NUMBERS = ['ammo', 'rebirths', 'wins', 'bestWall', 'spaceBest', 'caveBest', 'bossLevel']
-const LISTS = ['owned', 'ownedPets', 'equippedPets', 'unlockedTrainers', 'ownedPasses']
-const STRINGS = ['equipped']
+const LISTS = ['owned', 'ownedPets', 'equippedPets', 'unlockedTrainers', 'ownedPasses', 'ownedFootprints']
+const STRINGS = ['equipped', 'footprints']
 const BOOLEANS = ['opAutoOwned', 'autoWins']
 
 const cleanNumber = (value) =>
@@ -93,6 +93,9 @@ function sanitizeProgress(input, entitlements = []) {
   out.equippedPets = out.equippedPets.filter((id) => out.ownedPets.includes(id))
   if (out.equipped && !out.owned.includes(out.equipped)) out.equipped = out.owned[0] ?? null
   if (!out.equipped) delete out.equipped
+  // Footprints are bought per gun, and only the ones bought can be worn.
+  out.ownedFootprints = out.ownedFootprints.filter((id) => out.owned.includes(id))
+  if (!out.ownedFootprints.includes(out.footprints)) out.footprints = null
   return out
 }
 

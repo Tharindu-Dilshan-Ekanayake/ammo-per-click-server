@@ -139,3 +139,15 @@ test('the webhook refuses what this game cannot honour, so Bloxity refunds it', 
   assert.equal((await webhook({ ...base, sku: 'pass_2x_wins', gameSlug: 'other-game' })).status, 400)
   assert.equal((await webhook({ sku: 'pass_2x_wins' })).status, 400)
 })
+
+test('the leaderboard lists saved players by name, without signing in', async () => {
+  await new Promise((r) => setTimeout(r, 1100))
+  await call('PUT', '/api/progress', { body: { progress: { wins: 900, rebirths: 3, bossLevel: 4 } } })
+  const res = await call('GET', '/api/leaderboard', { token: null })
+  assert.equal(res.status, 200)
+  const body = await res.json()
+  assert.deepEqual(body.wins, [{ username: 'tester', value: 900 }])
+  assert.deepEqual(body.rebirths, [{ username: 'tester', value: 3 }])
+  // Level 4 is the next boss: three beaten.
+  assert.deepEqual(body.bosses, [{ username: 'tester', value: 3 }])
+})

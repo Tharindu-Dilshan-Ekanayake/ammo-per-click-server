@@ -35,6 +35,13 @@ function memoryStore() {
     async getEntitlements(userId) {
       return [...(entitlements.get(userId) ?? [])]
     },
+    async topSaves(field, limit) {
+      return [...saves.values()]
+        .filter((save) => save.username && save.progress?.[field] > 0)
+        .sort((a, b) => b.progress[field] - a.progress[field])
+        .slice(0, limit)
+        .map((save) => ({ username: save.username, value: save.progress[field] }))
+    },
     async recordPurchase(purchase, keep) {
       if (purchases.has(purchase._id)) return false
       purchases.set(purchase._id, purchase)
@@ -58,6 +65,8 @@ async function mongoStore(uri) {
   const entitlements = db.collection('entitlements')
   const purchases = db.collection('purchases')
   await purchases.createIndex({ userId: 1 })
+  // One per leaderboard (see routes.js), so the boards never scan every save.
+  await Promise.all(['wins', 'rebirths', 'bossLevel'].map((field) => saves.createIndex({ [`progress.${field}`]: -1 })))
 
   return {
     kind: 'mongo',
@@ -76,6 +85,16 @@ async function mongoStore(uri) {
     async getEntitlements(userId) {
       const doc = await entitlements.findOne({ _id: userId })
       return doc?.skus ?? []
+    },
+    /** The `limit` best saves by `progress[field]`, as `{ username, value }`. */
+    async topSaves(field, limit) {
+      const key = `progress.${field}`
+      const docs = await saves
+        .find({ username: { $nin: ['', null] }, [key]: { $gt: 0 } }, { projection: { username: 1, [key]: 1 } })
+        .sort({ [key]: -1 })
+        .limit(limit)
+        .toArray()
+      return docs.map((doc) => ({ username: doc.username, value: doc.progress[field] }))
     },
     /**
      * Records one webhook. Returns false if this transaction was already recorded -

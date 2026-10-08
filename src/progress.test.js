@@ -37,7 +37,7 @@ test('drops Bux items that were never bought, keeps the ones that were', () => {
   assert.equal(out.equipped, 'starter')
 })
 
-test('Ammo packs are consumables and never become entitlements', () => {
+test('a SKU the game does not sell grants nothing', () => {
   const out = withEntitlements({ owned: ['starter'] }, ['ammo_pack_1m'])
   assert.deepEqual(out.owned, ['starter'])
   assert.equal(out.ownedPasses, undefined)
@@ -52,4 +52,12 @@ test('a load hands back everything the account bought', () => {
 test('lists are de-duplicated, string-only and bounded', () => {
   const out = sanitizeProgress({ owned: ['a', 'a', 7, '', 'x'.repeat(100), 'b'] })
   assert.deepEqual(out.owned, ['a', 'b'])
+})
+
+test('footprints need the gun, and only bought ones can be worn', () => {
+  const out = sanitizeProgress({ owned: ['starter', 'space'], ownedFootprints: ['starter', 'lava'], footprints: 'lava' })
+  assert.deepEqual(out.ownedFootprints, ['starter'])
+  assert.equal(out.footprints, null)
+  const worn = sanitizeProgress({ owned: ['starter'], ownedFootprints: ['starter'], footprints: 'starter' })
+  assert.equal(worn.footprints, 'starter')
 })
