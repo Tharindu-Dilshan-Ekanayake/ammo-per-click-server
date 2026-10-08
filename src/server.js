@@ -1,12 +1,13 @@
 const cors = require('cors')
-const express = require('express')
 
 const { attachRealtime, originIsAllowed } = require('./realtime')
+const { mountRoutes } = require('./routes')
+const { openStore } = require('./store')
 
 const PORT = process.env.PORT || 3000
 
 /**
- * Every browser origin allowed to open a lobby socket.
+ * Every browser origin allowed to open a lobby socket or call the API.
  *
  * Three sources, because three different things know a piece of the answer. The
  * Vite dev origins are constants and belong in the code. `CLIENT_ORIGIN` is what
@@ -21,105 +22,85 @@ const ALLOWED_ORIGINS = [
   ...(process.env.ALLOWED_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) ?? []),
 ]
 
-// Express and the lobby room (Colyseus, over ws://host/ws-ish matchmaking - see
-// realtime.js) share one HTTP server and port; Colyseus owns the Express app.
-const realtime = attachRealtime({ allowedOrigins: ALLOWED_ORIGINS })
-const { app } = realtime
+async function main() {
+  // Before listening, on purpose: Legion sends no traffic to a pod until /health
+  // answers, so a pod that cannot reach its database never takes a player whose
+  // progress it would then fail to save. If it cannot connect at all it exits, and
+  // the platform starts it again.
+  const store = await openStore()
 
-app.use(
-  cors({
-    // A function, not the plain array, so a Legion-hosted build of this game is
-    // trusted the same way the socket already trusts it - see originIsAllowed's
-    // own comment in realtime.js for why that one extra case is safe.
-    origin: (origin, callback) => callback(null, originIsAllowed(origin, ALLOWED_ORIGINS)),
-    credentials: true,
-  }),
-)
-app.use(express.json())
+  // Express and the lobby room (Colyseus) share one HTTP server and port; Colyseus
+  // owns the Express app (see realtime.js).
+  const realtime = attachRealtime({ allowedOrigins: ALLOWED_ORIGINS })
+  const { app } = realtime
 
-/**
- * Two paths, one answer.
- *
- * `/health` is the one Bloxity Legion polls: a new deploy is given no traffic until
- * it replies, and a pod that stops replying is replaced. `/api/health` is what
- * render.yaml points at and what everything in this repo already used. Keeping both
- * costs a line and means neither host has to be talked out of its own convention.
- */
-const health = (_req, res) => res.json({ ok: true })
-app.get('/health', health)
-app.get('/api/health', health)
+  app.use(
+    cors({
+      // A function, not the plain array, so a Legion-hosted build of this game is
+      // trusted the same way the socket already trusts it - see originIsAllowed's
+      // own comment in realtime.js for why that one extra case is safe.
+      origin: (origin, callback) => callback(null, originIsAllowed(origin, ALLOWED_ORIGINS)),
+      credentials: true,
+    }),
+  )
 
-/**
- * Auth passthrough for the Bloxity SDK.
- *
- * The frontend will POST `{ token, user }` here from
- * `Legion.SDK.auth.authenticateWithServer('/api/legion-auth')`.
- *
- * NOTE: not wired up on the frontend yet — this milestone is login + avatar +
- * movement. When you do wire it, call `authenticateWithServer` from
- * `client/src/bloxity/BloxityProvider.jsx` inside the `onUserChanged` handler, right
- * after a non-null user arrives, and stash the returned accessToken for your own
- * API calls.
- */
-app.post('/api/legion-auth', (req, res) => {
-  console.log('[legion-auth] payload:', JSON.stringify(req.body, null, 2))
+  /**
+   * Two paths, one answer.
+   *
+   * `/health` is the one Bloxity Legion polls: a new deploy is given no traffic until
+   * it replies, and a pod that stops replying is replaced. `/api/health` is what
+   * render.yaml points at. Keeping both costs a line and means neither host has to be
+   * talked out of its own convention.
+   */
+  const health = (_req, res) => res.json({ ok: true, store: store.kind })
+  app.get('/health', health)
+  app.get('/api/health', health)
 
-  // TODO: verify the Bloxity JWT here before trusting req.body.user.
-  // Until that happens `req.body.user` is attacker-controlled — anyone can POST any
-  // legionId they like. Verify `req.body.token` against Bloxity's public key /
-  // introspection endpoint and derive the user from the *verified* claims, not from
-  // the body.
+  // Cloud saves and the purchase webhook (see routes.js).
+  mountRoutes(app, store)
 
-  res.json({
-    accessToken: 'stub',
-    user: { legionId: req.body.user?._id },
+  /** Open lobbies on this pod and how full they are. */
+  app.get('/api/lobbies', (_req, res) => {
+    res.json({ lobbies: realtime.lobbies.list() })
   })
-})
 
-/**
- * Webhook for future Bux purchases.
- * Responds 200 immediately — the platform will retry on anything else, so do the
- * real work asynchronously rather than holding the response open.
- */
-app.post('/api/legion-webhook', (req, res) => {
-  console.log('[legion-webhook] payload:', JSON.stringify(req.body, null, 2))
-
-  // TODO: verify x-legion-webhook-secret header, dedupe by transactionId, grant the item.
-
-  res.sendStatus(200)
-})
-
-/** Open lobbies and how full they are. */
-app.get('/api/lobbies', (_req, res) => {
-  res.json({ lobbies: realtime.lobbies.list() })
-})
-
-realtime.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT} (lobbies over Colyseus)`)
-})
-
-/**
- * Let the host drain this process instead of cutting it off.
- *
- * A rolling deploy sends SIGTERM and then waits a while before killing what is
- * left. Node's default answer to SIGTERM is to die on the spot - and every player
- * in a lobby is holding a WebSocket open, so that drops all of them, mid-game, on
- * every single deploy. Colyseus's graceful shutdown closes the rooms first, which
- * gives each client an ordinary disconnect it already knows how to reconnect from
- * (see the retry backoff in the client's lobbyClient.js).
- *
- * Nothing is persisted on the way out because there is nothing to persist: lobbies
- * are in-memory and disposable by design.
- */
-for (const signal of ['SIGTERM', 'SIGINT']) {
-  process.on(signal, () => {
-    console.log(`${signal} received - draining lobbies`)
-    realtime.close().then(
-      () => process.exit(0),
-      (error) => {
-        console.error('graceful shutdown failed:', error)
-        process.exit(1)
-      },
-    )
+  await realtime.listen(PORT, () => {
+    console.log(`Server listening on http://localhost:${PORT} (lobbies over Colyseus, saves in ${store.kind})`)
   })
+
+  /**
+   * Let the host drain this process instead of cutting it off.
+   *
+   * A rolling deploy sends SIGTERM and then waits a while before killing what is
+   * left. Node's default answer to SIGTERM is to die on the spot - and every player
+   * in a lobby is holding a WebSocket open, so that drops all of them, mid-game, on
+   * every single deploy. Colyseus's graceful shutdown closes the rooms first, which
+   * gives each client an ordinary disconnect it already knows how to recover from:
+   * it asks the matchmaker again and lands on the fresh pod (see the client's
+   * lobbyClient.js). Progress is not at risk either way - it is saved over HTTP, to
+   * the database, every few seconds - so the database is closed last.
+   */
+  let draining = false
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    process.on(signal, () => {
+      if (draining) return
+      draining = true
+      console.log(`${signal} received - draining lobbies`)
+      realtime
+        .close()
+        .then(() => store.close())
+        .then(
+          () => process.exit(0),
+          (error) => {
+            console.error('graceful shutdown failed:', error)
+            process.exit(1)
+          },
+        )
+    })
+  }
 }
+
+main().catch((error) => {
+  console.error('server failed to start:', error)
+  process.exit(1)
+})
