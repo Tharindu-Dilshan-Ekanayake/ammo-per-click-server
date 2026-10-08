@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
 
-const { sanitizeProgress, withEntitlements } = require('./progress')
+const { sanitizeProgress } = require('./progress')
 
 test('rejects anything that is not a save', () => {
   assert.equal(sanitizeProgress(null), null)
@@ -18,7 +18,7 @@ test('keeps numbers finite, positive and whole where they must be', () => {
   assert.equal(out.bestWall, 0)
 })
 
-test('drops Bux items that were never bought, keeps the ones that were', () => {
+test('keeps VIP items - they are bought with Wins like everything else', () => {
   const save = {
     owned: ['starter', 'space', 'phantom', 'celestial'],
     equipped: 'celestial',
@@ -27,26 +27,18 @@ test('drops Bux items that were never bought, keeps the ones that were', () => {
     ownedPets: ['common', 'exclusive'],
     equippedPets: ['exclusive', 'common'],
   }
-  const out = sanitizeProgress(save, ['gun_phantom_blaster', 'pass_2x_wins'])
-  assert.deepEqual(out.owned, ['starter', 'space', 'phantom'])
-  assert.deepEqual(out.ownedPasses, ['wins2x'])
-  assert.deepEqual(out.unlockedTrainers, ['target-1'])
-  assert.deepEqual(out.ownedPets, ['common'])
-  // Nothing un-owned may be following you, or in your hand.
-  assert.deepEqual(out.equippedPets, ['common'])
+  const out = sanitizeProgress(save)
+  assert.deepEqual(out.owned, ['starter', 'space', 'phantom', 'celestial'])
+  assert.equal(out.equipped, 'celestial')
+  assert.deepEqual(out.ownedPasses, ['power2x', 'wins2x'])
+  assert.deepEqual(out.unlockedTrainers, ['target-1', 'vip-2'])
+  assert.deepEqual(out.equippedPets, ['exclusive', 'common'])
+})
+
+test('nothing un-owned can be in your hand or following you', () => {
+  const out = sanitizeProgress({ owned: ['starter'], equipped: 'phantom', ownedPets: ['common'], equippedPets: ['exclusive', 'common'] })
   assert.equal(out.equipped, 'starter')
-})
-
-test('a SKU the game does not sell grants nothing', () => {
-  const out = withEntitlements({ owned: ['starter'] }, ['ammo_pack_1m'])
-  assert.deepEqual(out.owned, ['starter'])
-  assert.equal(out.ownedPasses, undefined)
-})
-
-test('a load hands back everything the account bought', () => {
-  const out = withEntitlements({ owned: ['starter'], ownedPasses: [] }, ['gun_celestial_minigun', 'pass_auto_wins'])
-  assert.deepEqual(out.owned, ['starter', 'celestial'])
-  assert.deepEqual(out.ownedPasses, ['autoWins'])
+  assert.deepEqual(out.equippedPets, ['common'])
 })
 
 test('lists are de-duplicated, string-only and bounded', () => {

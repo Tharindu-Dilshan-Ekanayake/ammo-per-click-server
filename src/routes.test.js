@@ -60,7 +60,6 @@ const call = (method, path, { token = TOKEN, body } = {}) =>
     body: body ? JSON.stringify(body) : undefined,
   })
 
-const webhook = (body) => call('POST', '/api/legion-webhook', { token: null, body })
 
 test('no token, or a token Bloxity does not know, is not signed in', async () => {
   assert.equal((await call('GET', '/api/progress', { token: null })).status, 401)
@@ -95,33 +94,6 @@ test('saves too close together are turned away', async () => {
   assert.equal(res.status, 429)
 })
 
-test('a Bux gun in a save only sticks once the webhook says it was bought', async () => {
-  await new Promise((r) => setTimeout(r, 1100))
-  await call('PUT', '/api/progress', { body: { progress: { owned: ['starter', 'phantom'], equipped: 'phantom' } } })
-  let body = await (await call('GET', '/api/progress')).json()
-  assert.deepEqual(body.progress.owned, ['starter'])
-
-  const purchase = {
-    transactionId: 'txn-1',
-    userId: USER._id,
-    username: USER.username,
-    gameSlug: 'ammo-per-click',
-    sku: 'gun_phantom_blaster',
-    productPrice: 99,
-  }
-  const first = await webhook(purchase)
-  assert.equal(first.status, 200)
-  assert.equal((await first.json()).duplicate, false)
-  // Bloxity retries a webhook that timed out: the repeat is fine, and grants nothing new.
-  const again = await webhook(purchase)
-  assert.equal(again.status, 200)
-  assert.equal((await again.json()).duplicate, true)
-
-  body = await (await call('GET', '/api/progress')).json()
-  assert.ok(body.progress.owned.includes('phantom'))
-  assert.deepEqual(body.granted.owned, ['phantom'])
-})
-
 test('a closing page can save with a beacon, token in the body', async () => {
   await new Promise((r) => setTimeout(r, 1100))
   const send = (body) =>
@@ -131,13 +103,6 @@ test('a closing page can save with a beacon, token in the body', async () => {
   assert.equal((await send(JSON.stringify({ token: TOKEN, progress: { ammo: 777 } }))).status, 200)
   const body = await (await call('GET', '/api/progress')).json()
   assert.equal(body.progress.ammo, 777)
-})
-
-test('the webhook refuses what this game cannot honour, so Bloxity refunds it', async () => {
-  const base = { transactionId: 'txn-2', userId: USER._id, gameSlug: 'ammo-per-click' }
-  assert.equal((await webhook({ ...base, sku: 'not_a_real_sku' })).status, 400)
-  assert.equal((await webhook({ ...base, sku: 'pass_2x_wins', gameSlug: 'other-game' })).status, 400)
-  assert.equal((await webhook({ sku: 'pass_2x_wins' })).status, 400)
 })
 
 test('the leaderboard lists saved players by name, without signing in', async () => {
