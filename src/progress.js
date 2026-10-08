@@ -1,14 +1,11 @@
-const { BUX_ITEMS, SAVE_FIELD, isKept, itemForSku } = require('./catalog')
-
 /**
  * What a saved game may contain, and the cleaning every save gets on the way in.
  *
  * The game is a single-player clicker at heart: Ammo and Wins are counted in the
  * browser, and the server cannot replay every click to check them. What it can do is
  * refuse anything malformed, keep numbers finite and inside JavaScript's exact range,
- * keep lists short and made of short strings - and above all refuse Bux items the
- * account never paid for. Those are the ones worth cheating for, and those it knows
- * for certain: the purchase webhook told it (see routes.js).
+ * keep lists short and made of short strings, and keep what is equipped consistent
+ * with what is owned.
  */
 
 /** Numbers in a save: finite, not negative, at most this. */
@@ -41,37 +38,15 @@ function cleanBoost(value) {
   return { multiplier, until }
 }
 
-/** The ids of every Bux item of each kind the account owns, from its SKUs. */
-function ownedByKind(entitlements) {
-  const out = {}
-  for (const sku of entitlements) {
-    const item = itemForSku(sku)
-    if (!item || !isKept(item)) continue
-    ;(out[item.kind] ??= new Set()).add(item.id)
-  }
-  return out
-}
-
-/** Every Bux item id that needs a purchase behind it, by save field. */
-const BUX_IDS = (() => {
-  const out = {}
-  for (const item of BUX_ITEMS) {
-    if (!isKept(item)) continue
-    ;(out[SAVE_FIELD[item.kind]] ??= new Set()).add(item.id)
-  }
-  return out
-})()
-
 /**
  * A save as the client sent it, made safe to store: every field typed and bounded,
- * nothing unknown kept, and any Bux item the account has not bought taken out.
+ * nothing unknown kept.
  *
  * Returns null if `input` is not an object at all.
  *
  * @param {unknown} input
- * @param {string[]} entitlements SKUs this account has bought
  */
-function sanitizeProgress(input, entitlements = []) {
+function sanitizeProgress(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null
   const out = {}
   for (const key of NUMBERS) out[key] = cleanNumber(input[key])
@@ -82,13 +57,6 @@ function sanitizeProgress(input, entitlements = []) {
   out.rebirths = Math.floor(out.rebirths)
   out.bossLevel = Math.max(1, Math.floor(out.bossLevel))
 
-  // Strip what was never paid for.
-  const owned = ownedByKind(entitlements)
-  for (const [kind, field] of Object.entries(SAVE_FIELD)) {
-    const sold = BUX_IDS[field]
-    if (!sold) continue
-    out[field] = out[field].filter((id) => !sold.has(id) || owned[kind]?.has(id))
-  }
   // A pet that is not owned cannot be following you, nor a gun in your hand.
   out.equippedPets = out.equippedPets.filter((id) => out.ownedPets.includes(id))
   if (out.equipped && !out.owned.includes(out.equipped)) out.equipped = out.owned[0] ?? null
@@ -99,20 +67,4 @@ function sanitizeProgress(input, entitlements = []) {
   return out
 }
 
-/**
- * A stored save, with everything the account has bought added in. A purchase made
- * on another device - or one whose webhook landed after the last save - shows up
- * here, which is what makes a pass follow the account rather than the browser.
- */
-function withEntitlements(progress, entitlements = []) {
-  const out = { ...progress }
-  const owned = ownedByKind(entitlements)
-  for (const [kind, field] of Object.entries(SAVE_FIELD)) {
-    const ids = owned[kind]
-    if (!ids) continue
-    out[field] = [...new Set([...(out[field] ?? []), ...ids])]
-  }
-  return out
-}
-
-module.exports = { sanitizeProgress, withEntitlements }
+module.exports = { sanitizeProgress }

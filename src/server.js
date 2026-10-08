@@ -56,7 +56,7 @@ async function main() {
   app.get('/health', health)
   app.get('/api/health', health)
 
-  // Cloud saves and the purchase webhook (see routes.js).
+  // Cloud saves and the leaderboards (see routes.js).
   mountRoutes(app, store)
 
   /** Open lobbies on this pod and how full they are. */
